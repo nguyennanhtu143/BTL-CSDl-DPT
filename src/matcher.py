@@ -56,8 +56,6 @@ def find_top_k(
     k = min(k, n)
 
     distances = euclidean_distance_batch(query, db_vectors)
-    top_idx = np.argpartition(distances, k - 1)[:k]
-    top_idx = top_idx[np.argsort(distances[top_idx])]
 
     if ids is None:
         ids_arr = np.arange(n)
@@ -66,4 +64,16 @@ def find_top_k(
         if ids_arr.shape[0] != n:
             raise ValueError(f"len(ids)={ids_arr.shape[0]} khác N={n}")
 
-    return [(ids_arr[i], float(distances[i])) for i in top_idx]
+    # Sắp xếp toàn bộ chỉ số theo khoảng cách, bỏ qua id đã gặp (phòng DB/ids lặp hoặc ghép dữ liệu lỗi).
+    order = np.argsort(distances)
+    out: list[tuple[object, float]] = []
+    seen: set[object] = set()
+    for i in order:
+        key = ids_arr[i]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((key, float(distances[i])))
+        if len(out) >= k:
+            break
+    return out

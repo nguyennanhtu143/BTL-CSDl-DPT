@@ -1,15 +1,18 @@
-"""Phase 2: Trích xuất đặc trưng màu sắc - Grid-based RGB Color Histogram.
+"""Phase 2: Trích xuất đặc trưng màu sắc - Grid-based Color Histogram (RGB hoặc LAB).
 
 Sơ đồ:
     Ảnh 256x144 -> chia lưới 3x3 -> 9 ô (~85x48)
-    Mỗi ô -> RGB histogram 4x4x4 = 64 bin
+    Mỗi ô -> histogram 4x4x4 = 64 bin (3 kênh lượng tử 4 mức; kênh là R/G/B hoặc L*/a*/b*)
     Ghép 9 histogram -> vector 576 chiều -> normalize L1
+
+Khi USE_LAB_COLOR_HISTOGRAM=True (config): lượng tử trên LAB (D65), cùng kích thước vector 576.
 """
 from __future__ import annotations
 
 import numpy as np
 
-from src.config import COLOR_BINS, GRID
+from src.config import COLOR_BINS, GRID, USE_LAB_COLOR_HISTOGRAM
+from src.lab_color import lab_quantized_indices
 
 
 def split_into_grid(img: np.ndarray, grid: int = GRID) -> list[np.ndarray]:
@@ -25,12 +28,12 @@ def split_into_grid(img: np.ndarray, grid: int = GRID) -> list[np.ndarray]:
     cells: list[np.ndarray] = []
     for i in range(grid):
         for j in range(grid):
-            cell = img[h_bounds[i]:h_bounds[i + 1], w_bounds[j]:w_bounds[j + 1]]
+            cell = img[h_bounds[i]: h_bounds[i + 1], w_bounds[j]: w_bounds[j + 1]]
             cells.append(cell)
     return cells
 
 
-def cell_histogram(cell: np.ndarray, bins: int = COLOR_BINS) -> np.ndarray:
+def cell_histogram_from_rgb_uint8(cell: np.ndarray, bins: int = COLOR_BINS) -> np.ndarray:
     """Tính histogram RGB lượng tử hóa cho 1 ô.
 
     Lượng tử hoá: chia [0, 256) thành `bins` khoảng đều, mỗi khoảng rộng 256/bins.
@@ -42,13 +45,71 @@ def cell_histogram(cell: np.ndarray, bins: int = COLOR_BINS) -> np.ndarray:
     if cell.dtype != np.uint8:
         raise ValueError(f"Yêu cầu uint8, nhận {cell.dtype}")
 
+    """
+    2. Lượng tử hoá RGB
+    Thay vì dùng 256 mức cho mỗi kênh (quá chi tiết), ta gom thành ít nhóm hơn.
+
+    Ở đây bins = 4 nên mỗi kênh chỉ còn 4 nhóm:
+
+    Nhóm 0: từ 0 đến 63
+    Nhóm 1: từ 64 đến 127
+    Nhóm 2: từ 128 đến 191
+    Nhóm 3: từ 192 đến 255
+    Cách làm trong code: chia nguyên cho 64 (vì 256 ÷ 4 = 64).
+    Ví dụ:
+
+    10 ÷ 64 = 0 → thuộc nhóm 0
+    100 ÷ 64 = 1 → thuộc nhóm 1
+    200 ÷ 64 = 3 → thuộc nhóm 3
+    Dòng step = 256 // bins chính là tính 64 (độ rộng mỗi nhóm).
+
+    Dòng quantized = cell ... // step nghĩa là:
+    Với từng pixel, lấy R, G, B và đổi thành 3 nhóm (0–3) tương ứng.
+
+    3. Ghép 3 nhóm thành 1 mã duy nhất
+    Sau bước trên, mỗi pixel có 3 số nhỏ (nhóm R, nhóm G, nhóm B), mỗi số từ 0 đến 3.
+
+    Bây giờ ta muốn gán cho pixel một mã số duy nhất từ 0 đến 63, giống như:
+
+    “Màu của pixel này thuộc loại màu số mấy trong bảng 64 loại?”
+
+    Vì có 4 khả năng cho R, 4 cho G, 4 cho B, nên tổng cộng tối đa là:
+
+    4 × 4 × 4 = 64 loại
+
+    Công thức trong code:
+
+    r * (4*4) + g * 4 + b
+    chính là cách ghép 3 chữ số (hệ 4) thành một chỉ số giống kiểu ghép số điện thoại theo từng phần:
+    (R nhóm nào, G nhóm nào, B nhóm nào) → ra một mã duy nhất.
+
+    Ví dụ cực đơn giản:
+
+    Pixel có RGB sau nhóm hoá là (0, 3, 0)
+    Mã = 0×16 + 3×4 + 0 = 12
+    → pixel đó được xếp vào “loại màu số 12”.
+    Đó là ý của đoạn:
+
+    bin_idx = r * (bins*bins) + g * bins + b
+    (quantized[...,0] là nhóm R, ...,1 là G, ...,2 là B.)
+    """
     step = 256 // bins
-    quantized = (cell.astype(np.int32) // step)
+    quantized = cell.astype(np.int32) // step
     bin_idx = (
         quantized[..., 0] * (bins * bins)
         + quantized[..., 1] * bins
         + quantized[..., 2]
     )
+    return np.bincount(bin_idx.ravel(), minlength=bins ** 3).astype(np.float32)
+
+
+def cell_histogram_binned(cell_q: np.ndarray, bins: int = COLOR_BINS) -> np.ndarray:
+    """Histogram 64 bin cho một ô; mỗi pixel đã có 3 chỉ số 0..bins-1 (LAB hoặc RGB sau lượng tử)."""
+    if cell_q.shape[-1] != 3:
+        raise ValueError(f"Yêu cầu ... 3 kênh cuối, nhận {cell_q.shape}")
+    q = cell_q.astype(np.int32)
+    q = np.clip(q, 0, bins - 1)
+    bin_idx = q[..., 0] * (bins * bins) + q[..., 1] * bins + q[..., 2]
     return np.bincount(bin_idx.ravel(), minlength=bins ** 3).astype(np.float32)
 
 
@@ -64,10 +125,22 @@ def color_histogram(
     img: np.ndarray,
     grid: int = GRID,
     bins: int = COLOR_BINS,
+    use_lab: bool | None = None,
 ) -> np.ndarray:
     """Ghép histogram của 9 ô thành 1 vector dài grid^2 * bins^3 (= 576)."""
-    cells = split_into_grid(img, grid)
-    hists = [cell_histogram(cell, bins) for cell in cells]
+    if use_lab is None:
+        use_lab = USE_LAB_COLOR_HISTOGRAM
+
+    if use_lab:
+        qimg = lab_quantized_indices(img, bins)
+    else:
+        if img.dtype != np.uint8:
+            raise ValueError(f"RGB histogram yêu cầu uint8, nhận {img.dtype}")
+        step = 256 // bins
+        qimg = (img.astype(np.int32) // step).clip(0, bins - 1).astype(np.int32)
+
+    cells = split_into_grid(qimg, grid)
+    hists = [cell_histogram_binned(cell, bins) for cell in cells]
     return np.concatenate(hists)
 
 
@@ -75,7 +148,8 @@ def extract_color_feature(
     img: np.ndarray,
     grid: int = GRID,
     bins: int = COLOR_BINS,
+    use_lab: bool | None = None,
 ) -> np.ndarray:
     """Pipeline đầy đủ: histogram lưới + chuẩn hoá L1. Trả vector float32."""
-    raw = color_histogram(img, grid, bins)
+    raw = color_histogram(img, grid, bins, use_lab=use_lab)
     return normalize_l1(raw)

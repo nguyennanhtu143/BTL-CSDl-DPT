@@ -8,6 +8,9 @@ Cách dùng:
 Output:
     data/features.db (SQLite)
     Console log: progress mỗi 50 ảnh, thời gian/ảnh, tổng thời gian
+
+Lưu ý: đổi USE_LAB_COLOR_HISTOGRAM trong src/config.py -> phải build lại CSDL (--rebuild)
+        vì vector 657 chiều (phần màu) không còn tương thích với DB cũ.
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.config import DATASET_DIR, DB_PATH
+from src.config import DATASET_DIR, DB_PATH, USE_LAB_COLOR_HISTOGRAM
 from src.database import (
     connect,
     count_images,
@@ -61,6 +64,7 @@ def build(
 
     print(f"[build] Dataset    : {dataset_dir}")
     print(f"[build] CSDL       : {db_path}")
+    print(f"[build] Histogram màu: {'LAB (CIE D65)' if USE_LAB_COLOR_HISTOGRAM else 'RGB'}")
     print(f"[build] Tổng ảnh    : {total}")
     print(f"[build] Đã có      : {len(skip)} (skip)")
     print(f"[build] Cần xử lý  : {len(to_process)}")

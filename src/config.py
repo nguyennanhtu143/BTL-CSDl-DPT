@@ -11,6 +11,9 @@ IMG_HEIGHT = 144
 
 GRID = 3
 
+# True: histogram màu trên CIELAB (tách sáng/sắc tốt hơn RGB). Đổi cờ -> cần build lại CSDL.
+USE_LAB_COLOR_HISTOGRAM = False
+
 COLOR_BINS = 4
 COLOR_DIM = (COLOR_BINS ** 3) * (GRID ** 2)
 

@@ -1,5 +1,7 @@
 """Phase 4: Tích hợp đặc trưng - ghép color (576) + shape (81) thành vector 657 chiều.
 
+Histogram màu: theo `USE_LAB_COLOR_HISTOGRAM` trong `config` (LAB khuyến nghị) hoặc RGB.
+
 Vector cuối cùng:
     feature = concat(W_COLOR * v_color, W_SHAPE * v_shape)
            = concat(0.7 * v_color_576, 0.3 * v_shape_81)
