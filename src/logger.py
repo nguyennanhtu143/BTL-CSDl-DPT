@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.config import COLOR_DIM, GRAD_DIM
+from src.config import COLOR_DIM, FREQ_DIM, GRAD_DIM
 
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
@@ -47,7 +47,8 @@ def log_query(
         full_vector: True => in toàn bộ 657 phần tử; False => rút gọn 4+4
     """
     color = query_vec[:COLOR_DIM]
-    shape = query_vec[COLOR_DIM:]
+    shape = query_vec[COLOR_DIM:COLOR_DIM + GRAD_DIM]
+    freq = query_vec[COLOR_DIM + GRAD_DIM:]
 
     print(SEPARATOR)
     print(f"[QUERY] Image: {filename}")
@@ -60,9 +61,12 @@ def log_query(
             print(np.array2string(color, separator=", ", prefix="    "))
             print(f"  - Shape ({GRAD_DIM} dim):")
             print(np.array2string(shape, separator=", ", prefix="    "))
+            print(f"  - Freq  ({FREQ_DIM} dim):")
+            print(np.array2string(freq, separator=", ", prefix="    "))
     else:
         print(f"  - Color ({COLOR_DIM} dim): {format_vector_preview(color)}")
         print(f"  - Shape ({GRAD_DIM} dim) : {format_vector_preview(shape)}")
+        print(f"  - Freq  ({FREQ_DIM} dim) : {format_vector_preview(freq)}")
 
     print(SUB_SEPARATOR)
     print("[TOP {} RESULTS]".format(len(results)))

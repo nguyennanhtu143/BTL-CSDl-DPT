@@ -77,3 +77,86 @@ def find_top_k(
         if len(out) >= k:
             break
     return out
+
+
+def weighted_distance_batch(
+    q_color: np.ndarray,
+    q_shape: np.ndarray,
+    q_freq: np.ndarray | None,
+    db_color: np.ndarray,
+    db_shape: np.ndarray,
+    db_freq: np.ndarray | None,
+    w_color: float,
+    w_shape: float,
+    w_freq: float = 0.0,
+) -> np.ndarray:
+    """Khoảng cách hợp thành: w_color*d_color_norm + w_shape*d_shape_norm.
+
+    d_color_norm, d_shape_norm được scale theo trung bình khoảng cách trên toàn DB
+    để 2 nhánh có biên độ gần nhau trước khi cộng trọng số.
+    """
+    d_color = euclidean_distance_batch(q_color, db_color)
+    d_shape = euclidean_distance_batch(q_shape, db_shape)
+    eps = 1e-12
+    s_color = max(float(np.mean(d_color)), eps)
+    s_shape = max(float(np.mean(d_shape)), eps)
+    out = w_color * (d_color / s_color) + w_shape * (d_shape / s_shape)
+    if q_freq is not None and db_freq is not None and w_freq > 0.0:
+        d_freq = euclidean_distance_batch(q_freq, db_freq)
+        s_freq = max(float(np.mean(d_freq)), eps)
+        out = out + w_freq * (d_freq / s_freq)
+    return out
+
+
+def find_top_k_weighted(
+    q_color: np.ndarray,
+    q_shape: np.ndarray,
+    q_freq: np.ndarray | None,
+    db_color: np.ndarray,
+    db_shape: np.ndarray,
+    db_freq: np.ndarray | None,
+    k: int = TOP_K,
+    ids: list | np.ndarray | None = None,
+    w_color: float = 0.7,
+    w_shape: float = 0.3,
+    w_freq: float = 0.0,
+) -> list[tuple[object, float]]:
+    """Top-k theo khoảng cách tổng hợp từ 2 vector thành phần."""
+    n = db_color.shape[0]
+    if n == 0:
+        return []
+    if db_shape.shape[0] != n:
+        raise ValueError("db_color và db_shape phải cùng số dòng")
+    k = min(k, n)
+
+    distances = weighted_distance_batch(
+        q_color=q_color,
+        q_shape=q_shape,
+        q_freq=q_freq,
+        db_color=db_color,
+        db_shape=db_shape,
+        db_freq=db_freq,
+        w_color=w_color,
+        w_shape=w_shape,
+        w_freq=w_freq,
+    )
+
+    if ids is None:
+        ids_arr = np.arange(n)
+    else:
+        ids_arr = np.asarray(ids, dtype=object)
+        if ids_arr.shape[0] != n:
+            raise ValueError(f"len(ids)={ids_arr.shape[0]} khác N={n}")
+
+    order = np.argsort(distances)
+    out: list[tuple[object, float]] = []
+    seen: set[object] = set()
+    for i in order:
+        key = ids_arr[i]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((key, float(distances[i])))
+        if len(out) >= k:
+            break
+    return out
