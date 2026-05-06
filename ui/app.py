@@ -26,11 +26,23 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-from src.config import COLOR_DIM, DATASET_DIR, GRAD_DIM, TOP_K, TOTAL_DIM, W_COLOR, W_SHAPE
+from src.config import (
+    COLOR_DIM,
+    DATASET_DIR,
+    FREQ_DIM,
+    GRAD_DIM,
+    TOP_K,
+    TOTAL_DIM,
+    W_COLOR,
+    W_FREQ,
+    W_LAYOUT,
+    W_SHAPE,
+)
 from src.database import load_database
-from src.feature_extractor import extract_features
+from src.feature_extractor import extract_feature_components
+from src.layout_features import extract_layout_scalars
 from src.logger import log_query
-from src.matcher import find_top_k
+from src.matcher import find_top_k_weighted
 from src.preprocessing import resize_image, to_grayscale
 
 st.set_page_config(
@@ -46,13 +58,17 @@ def get_db():
     return load_database()
 
 
-def extract_from_uploaded_bytes(img_bytes: bytes) -> tuple[np.ndarray, np.ndarray]:
-    """Đọc bytes -> RGB gốc + vector đặc trưng 657 chiều."""
+def extract_from_uploaded_bytes(
+    img_bytes: bytes,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Đọc bytes -> RGB gốc + (color, shape, freq) đặc trưng."""
     img = Image.open(BytesIO(img_bytes)).convert("RGB")
     rgb_orig = np.asarray(img, dtype=np.uint8)
     rgb = resize_image(rgb_orig)
     gray = to_grayscale(rgb)
-    return rgb_orig, extract_features(rgb, gray)
+    c, s, f = extract_feature_components(rgb, gray)
+    l = np.asarray(extract_layout_scalars(gray), dtype=np.float32)
+    return rgb_orig, c, s, f, l
 
 
 def render_results(results: list[tuple[str, float]]) -> None:
@@ -121,11 +137,29 @@ def main() -> None:
 
         try:
             t0 = time.perf_counter()
-            _, q_vec = extract_from_uploaded_bytes(img_bytes)
+            _, q_color, q_shape, q_freq, q_layout = extract_from_uploaded_bytes(img_bytes)
+            q_vec = np.concatenate([W_COLOR * q_color, W_SHAPE * q_shape, W_FREQ * q_freq]).astype(
+                np.float32
+            )
             t_extract = (time.perf_counter() - t0) * 1000
 
             t0 = time.perf_counter()
-            top = find_top_k(q_vec, db.vectors, k=int(k), ids=db.filenames)
+            top = find_top_k_weighted(
+                q_color=q_color,
+                q_shape=q_shape,
+                q_freq=q_freq,
+                db_color=db.color_vectors,
+                db_shape=db.shape_vectors,
+                db_freq=db.freq_vectors,
+                q_layout=q_layout,
+                db_layout=db.layout_scalars,
+                k=int(k),
+                ids=db.filenames,
+                w_color=W_COLOR,
+                w_shape=W_SHAPE,
+                w_freq=W_FREQ,
+                w_layout=W_LAYOUT,
+            )
             results = [(str(name), float(dist)) for name, dist in top]
             t_match = (time.perf_counter() - t0) * 1000
         except Exception as exc:  # noqa: BLE001
@@ -137,10 +171,11 @@ def main() -> None:
         st.subheader(f"Top-{len(results)} kết quả")
         render_results(results)
 
-        with st.expander("Thông tin vector đặc trưng (657 chiều)"):
+        with st.expander(f"Thông tin vector đặc trưng ({TOTAL_DIM} chiều)"):
             color = q_vec[:COLOR_DIM]
-            shape = q_vec[COLOR_DIM:]
-            c1, c2, c3 = st.columns(3)
+            shape = q_vec[COLOR_DIM:COLOR_DIM + GRAD_DIM]
+            freq = q_vec[COLOR_DIM + GRAD_DIM:]
+            c1, c2, c3, c4 = st.columns(4)
             c1.metric(
                 "Color (576 dim)",
                 f"sum = {color.sum():.4f}",
@@ -152,6 +187,11 @@ def main() -> None:
                 f"non-zero {(shape > 0).sum()}/{GRAD_DIM}",
             )
             c3.metric(
+                "Frequency",
+                f"sum = {freq.sum():.4f}",
+                f"non-zero {(freq > 0).sum()}/{FREQ_DIM}",
+            )
+            c4.metric(
                 "Tổng",
                 f"sum = {q_vec.sum():.4f}",
                 f"shape = {q_vec.shape}",
