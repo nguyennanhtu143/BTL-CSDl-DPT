@@ -26,9 +26,21 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-from src.config import COLOR_DIM, DATASET_DIR, FREQ_DIM, GRAD_DIM, TOP_K, TOTAL_DIM, W_COLOR, W_FREQ, W_SHAPE
+from src.config import (
+    COLOR_DIM,
+    DATASET_DIR,
+    FREQ_DIM,
+    GRAD_DIM,
+    TOP_K,
+    TOTAL_DIM,
+    W_COLOR,
+    W_FREQ,
+    W_LAYOUT,
+    W_SHAPE,
+)
 from src.database import load_database
 from src.feature_extractor import extract_feature_components
+from src.layout_features import extract_layout_scalars
 from src.logger import log_query
 from src.matcher import find_top_k_weighted
 from src.preprocessing import resize_image, to_grayscale
@@ -48,14 +60,15 @@ def get_db():
 
 def extract_from_uploaded_bytes(
     img_bytes: bytes,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Đọc bytes -> RGB gốc + (color, shape, freq) đặc trưng."""
     img = Image.open(BytesIO(img_bytes)).convert("RGB")
     rgb_orig = np.asarray(img, dtype=np.uint8)
     rgb = resize_image(rgb_orig)
     gray = to_grayscale(rgb)
     c, s, f = extract_feature_components(rgb, gray)
-    return rgb_orig, c, s, f
+    l = np.asarray(extract_layout_scalars(gray), dtype=np.float32)
+    return rgb_orig, c, s, f, l
 
 
 def render_results(results: list[tuple[str, float]]) -> None:
@@ -124,7 +137,7 @@ def main() -> None:
 
         try:
             t0 = time.perf_counter()
-            _, q_color, q_shape, q_freq = extract_from_uploaded_bytes(img_bytes)
+            _, q_color, q_shape, q_freq, q_layout = extract_from_uploaded_bytes(img_bytes)
             q_vec = np.concatenate([W_COLOR * q_color, W_SHAPE * q_shape, W_FREQ * q_freq]).astype(
                 np.float32
             )
@@ -138,11 +151,14 @@ def main() -> None:
                 db_color=db.color_vectors,
                 db_shape=db.shape_vectors,
                 db_freq=db.freq_vectors,
+                q_layout=q_layout,
+                db_layout=db.layout_scalars,
                 k=int(k),
                 ids=db.filenames,
                 w_color=W_COLOR,
                 w_shape=W_SHAPE,
                 w_freq=W_FREQ,
+                w_layout=W_LAYOUT,
             )
             results = [(str(name), float(dist)) for name, dist in top]
             t_match = (time.perf_counter() - t0) * 1000

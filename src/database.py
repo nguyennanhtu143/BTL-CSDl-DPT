@@ -17,9 +17,10 @@ from src.config import (
     TOTAL_DIM,
     W_COLOR,
     W_FREQ,
+    W_LAYOUT,
     W_SHAPE,
 )
-from src.feature_extractor import extract_components_from_path
+from src.feature_extractor import extract_components_from_path, extract_layout_from_path
 from src.matcher import find_top_k_weighted
 
 VECTOR_DTYPE = np.float32
@@ -34,6 +35,10 @@ CREATE TABLE IF NOT EXISTS images (
     color_vector BLOB,
     shape_vector BLOB,
     freq_vector BLOB,
+    eccentricity REAL,
+    contrast REAL,
+    roughness REAL,
+    orderliness REAL,
     feature_vector BLOB NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -49,6 +54,7 @@ class DatabaseSnapshot:
     color_vectors: np.ndarray
     shape_vectors: np.ndarray
     freq_vectors: np.ndarray
+    layout_scalars: np.ndarray  # shape (N,4): ecc, contrast, roughness, orderliness
 
     def __len__(self) -> int:
         return len(self.filenames)
@@ -85,6 +91,14 @@ def _ensure_split_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE images ADD COLUMN shape_vector BLOB")
     if "freq_vector" not in cols:
         conn.execute("ALTER TABLE images ADD COLUMN freq_vector BLOB")
+    if "eccentricity" not in cols:
+        conn.execute("ALTER TABLE images ADD COLUMN eccentricity REAL")
+    if "contrast" not in cols:
+        conn.execute("ALTER TABLE images ADD COLUMN contrast REAL")
+    if "roughness" not in cols:
+        conn.execute("ALTER TABLE images ADD COLUMN roughness REAL")
+    if "orderliness" not in cols:
+        conn.execute("ALTER TABLE images ADD COLUMN orderliness REAL")
 
 
 def serialize_vector_fixed(vec: np.ndarray, dim: int) -> bytes:
@@ -118,10 +132,14 @@ def insert_image(
     color_vector: np.ndarray,
     shape_vector: np.ndarray,
     freq_vector: np.ndarray,
+    eccentricity: float,
+    contrast: float,
+    roughness: float,
+    orderliness: float,
 ) -> int:
     cur = conn.execute(
-        "INSERT INTO images (filename, width, height, file_size, color_vector, shape_vector, freq_vector, feature_vector) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO images (filename, width, height, file_size, color_vector, shape_vector, freq_vector, eccentricity, contrast, roughness, orderliness, feature_vector) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             filename,
             width,
@@ -130,6 +148,10 @@ def insert_image(
             serialize_vector_fixed(color_vector, COLOR_DIM),
             serialize_vector_fixed(shape_vector, GRAD_DIM),
             serialize_vector_fixed(freq_vector, FREQ_DIM),
+            float(eccentricity),
+            float(contrast),
+            float(roughness),
+            float(orderliness),
             serialize_vector(vector),
         ),
     )
@@ -146,11 +168,15 @@ def upsert_image(
     color_vector: np.ndarray,
     shape_vector: np.ndarray,
     freq_vector: np.ndarray,
+    eccentricity: float,
+    contrast: float,
+    roughness: float,
+    orderliness: float,
 ) -> int:
     cur = conn.execute(
         """
-        INSERT INTO images (filename, width, height, file_size, color_vector, shape_vector, freq_vector, feature_vector)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO images (filename, width, height, file_size, color_vector, shape_vector, freq_vector, eccentricity, contrast, roughness, orderliness, feature_vector)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(filename) DO UPDATE SET
             width = excluded.width,
             height = excluded.height,
@@ -158,6 +184,10 @@ def upsert_image(
             color_vector = excluded.color_vector,
             shape_vector = excluded.shape_vector,
             freq_vector = excluded.freq_vector,
+            eccentricity = excluded.eccentricity,
+            contrast = excluded.contrast,
+            roughness = excluded.roughness,
+            orderliness = excluded.orderliness,
             feature_vector = excluded.feature_vector,
             created_at = CURRENT_TIMESTAMP
         """,
@@ -169,6 +199,10 @@ def upsert_image(
             serialize_vector_fixed(color_vector, COLOR_DIM),
             serialize_vector_fixed(shape_vector, GRAD_DIM),
             serialize_vector_fixed(freq_vector, FREQ_DIM),
+            float(eccentricity),
+            float(contrast),
+            float(roughness),
+            float(orderliness),
             serialize_vector(vector),
         ),
     )
@@ -205,11 +239,11 @@ def load_database(db_path: str | Path = DB_PATH) -> DatabaseSnapshot:
         has_freq = "freq_vector" in cols
         if has_split2 and has_freq:
             rows = conn.execute(
-                "SELECT id, filename, color_vector, shape_vector, freq_vector, feature_vector FROM images ORDER BY id"
+                "SELECT id, filename, color_vector, shape_vector, freq_vector, eccentricity, contrast, roughness, orderliness, feature_vector FROM images ORDER BY id"
             ).fetchall()
         elif has_split2:
             rows = conn.execute(
-                "SELECT id, filename, color_vector, shape_vector, feature_vector FROM images ORDER BY id"
+                "SELECT id, filename, color_vector, shape_vector, feature_vector, eccentricity, contrast, roughness, orderliness FROM images ORDER BY id"
             ).fetchall()
         else:
             rows = conn.execute("SELECT id, filename, feature_vector FROM images ORDER BY id").fetchall()
@@ -222,6 +256,7 @@ def load_database(db_path: str | Path = DB_PATH) -> DatabaseSnapshot:
             color_vectors=np.zeros((0, COLOR_DIM), dtype=VECTOR_DTYPE),
             shape_vectors=np.zeros((0, GRAD_DIM), dtype=VECTOR_DTYPE),
             freq_vectors=np.zeros((0, FREQ_DIM), dtype=VECTOR_DTYPE),
+            layout_scalars=np.zeros((0, 4), dtype=VECTOR_DTYPE),
         )
 
     ids = np.array([r[0] for r in rows], dtype=np.int64)
@@ -230,11 +265,19 @@ def load_database(db_path: str | Path = DB_PATH) -> DatabaseSnapshot:
         color_vectors = np.stack([deserialize_vector_fixed(r[2], COLOR_DIM) for r in rows])
         shape_vectors = np.stack([deserialize_vector_fixed(r[3], GRAD_DIM) for r in rows])
         freq_vectors = np.stack([deserialize_vector_fixed(r[4], FREQ_DIM) for r in rows])
-        vectors = np.stack([deserialize_vector(r[5]) for r in rows])
+        layout_scalars = np.array(
+            [[r[5] or 0.0, r[6] or 0.0, r[7] or 0.0, r[8] or 0.0] for r in rows],
+            dtype=VECTOR_DTYPE,
+        )
+        vectors = np.stack([deserialize_vector(r[9]) for r in rows])
     elif has_split2:
         color_vectors = np.stack([deserialize_vector_fixed(r[2], COLOR_DIM) for r in rows])
         shape_vectors = np.stack([deserialize_vector_fixed(r[3], GRAD_DIM) for r in rows])
         vectors = np.stack([deserialize_vector(r[4]) for r in rows])
+        layout_scalars = np.array(
+            [[r[5] or 0.0, r[6] or 0.0, r[7] or 0.0, r[8] or 0.0] for r in rows],
+            dtype=VECTOR_DTYPE,
+        )
         if vectors.shape[1] >= COLOR_DIM + GRAD_DIM + FREQ_DIM:
             freq_vectors = vectors[:, COLOR_DIM + GRAD_DIM:COLOR_DIM + GRAD_DIM + FREQ_DIM].astype(
                 VECTOR_DTYPE, copy=True
@@ -251,6 +294,7 @@ def load_database(db_path: str | Path = DB_PATH) -> DatabaseSnapshot:
             )
         else:
             freq_vectors = np.zeros((vectors.shape[0], FREQ_DIM), dtype=VECTOR_DTYPE)
+        layout_scalars = np.zeros((vectors.shape[0], 4), dtype=VECTOR_DTYPE)
     return DatabaseSnapshot(
         ids=ids,
         filenames=filenames,
@@ -258,6 +302,7 @@ def load_database(db_path: str | Path = DB_PATH) -> DatabaseSnapshot:
         color_vectors=color_vectors,
         shape_vectors=shape_vectors,
         freq_vectors=freq_vectors,
+        layout_scalars=layout_scalars,
     )
 
 
@@ -273,6 +318,7 @@ def query(
         raise RuntimeError(f"CSDL rỗng tại {db_path}. Hãy chạy build_database.py.")
 
     q_color, q_shape, q_freq = extract_components_from_path(image_path)
+    q_layout = extract_layout_from_path(image_path)
     q = np.concatenate([W_COLOR * q_color, W_SHAPE * q_shape, W_FREQ * q_freq]).astype(np.float32)
     top = find_top_k_weighted(
         q_color=q_color,
@@ -281,11 +327,14 @@ def query(
         db_color=db.color_vectors,
         db_shape=db.shape_vectors,
         db_freq=db.freq_vectors,
+        q_layout=q_layout,
+        db_layout=db.layout_scalars,
         k=k,
         ids=db.filenames,
         w_color=W_COLOR,
         w_shape=W_SHAPE,
         w_freq=W_FREQ,
+        w_layout=W_LAYOUT,
     )
     return q, [(str(name), dist) for name, dist in top]
 

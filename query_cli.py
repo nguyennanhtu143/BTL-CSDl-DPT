@@ -19,7 +19,7 @@ import numpy as np
 
 from src.config import DB_PATH, TOP_K, W_COLOR, W_FREQ, W_SHAPE
 from src.database import count_images, load_database, query
-from src.feature_extractor import extract_components_from_path
+from src.feature_extractor import extract_components_from_path, extract_layout_from_path
 from src.logger import log_query
 from src.retrieval_accel import AccelRetriever
 
@@ -52,11 +52,18 @@ def main() -> None:
     else:
         try:
             q_color, q_shape, q_freq = extract_components_from_path(args.image)
+            q_layout = extract_layout_from_path(args.image)
             q_vec = np.concatenate([W_COLOR * q_color, W_SHAPE * q_shape, W_FREQ * q_freq]).astype(
                 np.float32
             )
             accel = AccelRetriever(db=db)
-            results = accel.query(q_color=q_color, q_shape=q_shape, q_freq=q_freq, k=args.k)
+            results = accel.query(
+                q_color=q_color,
+                q_shape=q_shape,
+                q_freq=q_freq,
+                q_layout=q_layout,
+                k=args.k,
+            )
         except Exception:
             q_vec, results = query(args.image, db=db, k=args.k)
     t_query = (time.perf_counter() - t0) * 1000

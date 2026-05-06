@@ -86,9 +86,12 @@ def weighted_distance_batch(
     db_color: np.ndarray,
     db_shape: np.ndarray,
     db_freq: np.ndarray | None,
+    q_layout: np.ndarray | None,
+    db_layout: np.ndarray | None,
     w_color: float,
     w_shape: float,
     w_freq: float = 0.0,
+    w_layout: float = 0.0,
 ) -> np.ndarray:
     """Khoảng cách hợp thành: w_color*d_color_norm + w_shape*d_shape_norm.
 
@@ -105,6 +108,10 @@ def weighted_distance_batch(
         d_freq = euclidean_distance_batch(q_freq, db_freq)
         s_freq = max(float(np.mean(d_freq)), eps)
         out = out + w_freq * (d_freq / s_freq)
+    if q_layout is not None and db_layout is not None and w_layout > 0.0:
+        d_layout = euclidean_distance_batch(q_layout, db_layout)
+        s_layout = max(float(np.mean(d_layout)), eps)
+        out = out + w_layout * (d_layout / s_layout)
     return out
 
 
@@ -115,11 +122,14 @@ def find_top_k_weighted(
     db_color: np.ndarray,
     db_shape: np.ndarray,
     db_freq: np.ndarray | None,
+    q_layout: np.ndarray | None,
+    db_layout: np.ndarray | None,
     k: int = TOP_K,
     ids: list | np.ndarray | None = None,
     w_color: float = 0.7,
     w_shape: float = 0.3,
     w_freq: float = 0.0,
+    w_layout: float = 0.0,
 ) -> list[tuple[object, float]]:
     """Top-k theo khoảng cách tổng hợp từ 2 vector thành phần."""
     n = db_color.shape[0]
@@ -136,9 +146,12 @@ def find_top_k_weighted(
         db_color=db_color,
         db_shape=db_shape,
         db_freq=db_freq,
+        q_layout=q_layout,
+        db_layout=db_layout,
         w_color=w_color,
         w_shape=w_shape,
         w_freq=w_freq,
+        w_layout=w_layout,
     )
 
     if ids is None:

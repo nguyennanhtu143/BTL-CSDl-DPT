@@ -18,6 +18,7 @@ from src.color_features import extract_color_feature
 from src.config import COLOR_DIM, FREQ_DIM, GRAD_DIM, TOTAL_DIM, W_COLOR, W_FREQ, W_SHAPE
 from src.frequency_features import extract_frequency_feature
 from src.gradient_features import extract_gradient_feature
+from src.layout_features import extract_layout_scalars
 from src.preprocessing import load_image, resize_image, to_grayscale
 
 
@@ -82,6 +83,13 @@ def extract_components_from_path(path: str | Path) -> tuple[np.ndarray, np.ndarr
     rgb = resize_image(load_image(path))
     gray = to_grayscale(rgb)
     return extract_feature_components(rgb, gray)
+
+
+def extract_layout_from_path(path: str | Path) -> np.ndarray:
+    """Pipeline đầu-cuối từ file: load -> resize -> trả 4 scalar layout."""
+    rgb = resize_image(load_image(path))
+    gray = to_grayscale(rgb)
+    return np.asarray(extract_layout_scalars(gray), dtype=np.float32)
 
 
 def split_feature_parts(feature: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

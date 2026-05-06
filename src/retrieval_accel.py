@@ -10,6 +10,7 @@ from src.config import (
     PCA_MODEL_PATH,
     W_COLOR,
     W_FREQ,
+    W_LAYOUT,
     W_SHAPE,
 )
 from src.database import DatabaseSnapshot
@@ -51,6 +52,7 @@ class AccelRetriever:
         q_color: np.ndarray,
         q_shape: np.ndarray,
         q_freq: np.ndarray,
+        q_layout: np.ndarray,
         k: int,
     ) -> list[tuple[str, float]]:
         q_color_pca = transform_pca(
@@ -77,10 +79,13 @@ class AccelRetriever:
             db_color=self.db_color_pca[cand],
             db_shape=self.db_shape_pca[cand],
             db_freq=self.db_freq_pca[cand],
+            q_layout=q_layout,
+            db_layout=self.db.layout_scalars[cand],
             k=k,
             ids=np.asarray(self.db.filenames, dtype=object)[cand],
             w_color=W_COLOR,
             w_shape=W_SHAPE,
             w_freq=W_FREQ,
+            w_layout=W_LAYOUT,
         )
         return [(str(name), float(dist)) for name, dist in top]

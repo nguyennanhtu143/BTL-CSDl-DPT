@@ -36,6 +36,8 @@ from src.database import (
     upsert_image,
 )
 from src.feature_extractor import extract_components_from_path
+from src.layout_features import extract_layout_scalars
+from src.preprocessing import load_image, resize_image, to_grayscale
 from src.ivf_index import build_ivf, save_ivf
 from src.pca_utils import fit_pca, save_pca_bundle, transform_pca
 
@@ -91,6 +93,9 @@ def build(
             try:
                 width, height, file_size = read_image_meta(path)
                 color_vec, shape_vec, freq_vec = extract_components_from_path(path)
+                rgb = resize_image(load_image(path))
+                gray = to_grayscale(rgb)
+                eccentricity, contrast, roughness, orderliness = extract_layout_scalars(gray)
                 vector = np.concatenate([W_COLOR * color_vec, W_SHAPE * shape_vec, W_FREQ * freq_vec]).astype(
                     np.float32
                 )
@@ -104,6 +109,10 @@ def build(
                     color_vector=color_vec,
                     shape_vector=shape_vec,
                     freq_vector=freq_vec,
+                    eccentricity=eccentricity,
+                    contrast=contrast,
+                    roughness=roughness,
+                    orderliness=orderliness,
                 )
             except Exception as exc:
                 failures.append((path.name, str(exc)))
