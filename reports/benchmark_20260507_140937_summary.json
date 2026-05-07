@@ -1,0 +1,32 @@
+{
+  "n_queries": 3,
+  "k": 3,
+  "pipelines": {
+    "legacy": {
+      "avg_query_ms": 62.97679999746227,
+      "self_at_1": 3,
+      "self_at_1_rate": 1.0
+    },
+    "compact6": {
+      "avg_query_ms": 21.60160000009152,
+      "self_at_1": 3,
+      "self_at_1_rate": 1.0
+    },
+    "hybrid": {
+      "avg_query_ms": 24.53780000117452,
+      "self_at_1": 3,
+      "self_at_1_rate": 1.0
+    },
+    "hybrid3": {
+      "avg_query_ms": 26.370066666762188,
+      "self_at_1": 3,
+      "self_at_1_rate": 1.0
+    }
+  },
+  "avg_overlap_topk_jaccard": {
+    "legacy_vs_compact6": 0.39999999999999997,
+    "legacy_vs_hybrid": 0.5666666666666667,
+    "legacy_vs_hybrid3": 0.39999999999999997,
+    "hybrid_vs_hybrid3": 0.6666666666666666
+  }
+}

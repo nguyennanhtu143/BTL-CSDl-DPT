@@ -11,7 +11,7 @@ from src.color_features import extract_color_feature
 from src.compact6_features import extract_compact6
 from src.config import GRAD_DIM
 from src.gradient_features import extract_gradient_feature
-from src.matcher_hybrid3 import find_top_k_hybrid3
+from src.matcher_hybrid3 import find_top_k_hybrid3, find_top_k_hybrid3_two_stage
 from src.preprocessing import load_image, resize_image, to_grayscale
 
 HIST_DIM = 576
@@ -209,9 +209,23 @@ def query(
     w_hist: float = 0.45,
     w_grad: float = 0.30,
     w_compact: float = 0.25,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[str, float]]]:
+    hist_metric: str = "l2",
+    coarse_top: int | None = None,
+    return_breakdown: bool = False,
+):
+    """Query hybrid3.
+
+    Default behavior giữ nguyên (single-stage, L2, không breakdown) để
+    benchmark_pipelines.py và caller cũ không bị đổi signature.
+
+    Tham số nâng cao:
+        hist_metric: 'l2' | 'l1' | 'chi2' | 'intersection' cho color histogram.
+        coarse_top: nếu > 0, dùng two-stage retrieval (compact6 lọc thô).
+        return_breakdown: nếu True, trả thêm list dict per-branch contribution.
+    """
     q_hist, q_grad, q_compact, _ = extract_hybrid3_from_path(image_path)
-    top = find_top_k_hybrid3(
+
+    common_kwargs = dict(
         q_hist=q_hist,
         q_grad=q_grad,
         q_compact=q_compact,
@@ -223,5 +237,16 @@ def query(
         w_hist=w_hist,
         w_grad=w_grad,
         w_compact=w_compact,
+        hist_metric=hist_metric,
+        return_breakdown=return_breakdown,
     )
-    return q_hist, q_grad, q_compact, top
+
+    if coarse_top is not None and coarse_top > 0:
+        result = find_top_k_hybrid3_two_stage(coarse_top=coarse_top, **common_kwargs)
+    else:
+        result = find_top_k_hybrid3(**common_kwargs)
+
+    if return_breakdown:
+        top, breakdown = result
+        return q_hist, q_grad, q_compact, top, breakdown
+    return q_hist, q_grad, q_compact, result
