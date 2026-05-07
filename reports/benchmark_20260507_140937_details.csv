@@ -1,0 +1,13 @@
+query_name,pipeline,query_ms,rank1_name,rank2_name,rank3_name,rank1_dist,rank2_dist,rank3_dist
+01_thien_nhien_0001.jpg,legacy,101.2555,01_thien_nhien_0001.jpg,01_thien_nhien_0012.jpg,01_thien_nhien_0423.jpg,0.000000,0.431666,0.668076
+01_thien_nhien_0001.jpg,compact6,27.0605,01_thien_nhien_0001.jpg,01_thien_nhien_0012.jpg,01_thien_nhien_0500.jpg,0.000000,0.096601,0.190103
+01_thien_nhien_0001.jpg,hybrid,22.0086,01_thien_nhien_0001.jpg,01_thien_nhien_0012.jpg,01_thien_nhien_0423.jpg,0.000000,0.280741,0.556412
+01_thien_nhien_0001.jpg,hybrid3,26.9349,01_thien_nhien_0001.jpg,01_thien_nhien_0012.jpg,01_thien_nhien_0290.jpg,0.000000,0.344146,0.588295
+01_thien_nhien_0002.jpg,legacy,42.3673,01_thien_nhien_0002.jpg,01_thien_nhien_0126.jpg,01_thien_nhien_0488.jpg,0.000000,0.717885,0.773434
+01_thien_nhien_0002.jpg,compact6,19.0486,01_thien_nhien_0002.jpg,01_thien_nhien_0010.jpg,01_thien_nhien_0400.jpg,0.000000,0.262206,0.331015
+01_thien_nhien_0002.jpg,hybrid,26.6689,01_thien_nhien_0002.jpg,01_thien_nhien_0278.jpg,01_thien_nhien_0386.jpg,0.000000,0.512923,0.525996
+01_thien_nhien_0002.jpg,hybrid3,24.4945,01_thien_nhien_0002.jpg,01_thien_nhien_0278.jpg,01_thien_nhien_0386.jpg,0.000000,0.631424,0.643681
+01_thien_nhien_0003.jpg,legacy,45.3076,01_thien_nhien_0003.jpg,01_thien_nhien_0016.jpg,01_thien_nhien_0135.jpg,0.000000,0.658437,0.738130
+01_thien_nhien_0003.jpg,compact6,18.6957,01_thien_nhien_0003.jpg,01_thien_nhien_0030.jpg,01_thien_nhien_0016.jpg,0.000000,0.088342,0.140173
+01_thien_nhien_0003.jpg,hybrid,24.9359,01_thien_nhien_0003.jpg,01_thien_nhien_0016.jpg,01_thien_nhien_0030.jpg,0.000000,0.499988,0.570809
+01_thien_nhien_0003.jpg,hybrid3,27.6808,01_thien_nhien_0003.jpg,01_thien_nhien_0016.jpg,01_thien_nhien_0006.jpg,0.000000,0.530233,0.574313

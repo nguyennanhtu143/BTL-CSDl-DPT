@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import html
 import json
@@ -176,7 +177,15 @@ def _write_csv(details: list[dict], out_csv: Path, k: int) -> None:
 def _img_tag(img_path: Path, width: int = 200) -> str:
     if not img_path.exists():
         return "<div>missing</div>"
-    src = html.escape(img_path.as_posix())
+    ext = img_path.suffix.lower()
+    mime = "image/jpeg"
+    if ext == ".png":
+        mime = "image/png"
+    elif ext == ".webp":
+        mime = "image/webp"
+    raw = img_path.read_bytes()
+    b64 = base64.b64encode(raw).decode("ascii")
+    src = f"data:{mime};base64,{b64}"
     return f'<img src="{src}" width="{width}" loading="lazy" />'
 
 
