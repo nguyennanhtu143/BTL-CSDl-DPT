@@ -6,37 +6,89 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.config import DATA_DIR
 from src.database_hybrid3 import count_images, load_database, query
-from src.distances import HIST_METRICS
 
 DB_HYBRID3_DEFAULT = DATA_DIR / "features_hybrid3.db"
+
+
+def _format_vector_preview(
+    vec: np.ndarray,
+    n_head: int = 6,
+    n_tail: int = 4,
+    precision: int = 4,
+) -> str:
+    """Rút gọn vector dài thành '[v0, v1, ..., vn-1, vn]' để dễ đọc trên 1 dòng."""
+    arr = np.asarray(vec).ravel()
+    if arr.size <= n_head + n_tail:
+        items = [f"{x:.{precision}f}" for x in arr]
+    else:
+        head = [f"{x:.{precision}f}" for x in arr[:n_head]]
+        tail = [f"{x:.{precision}f}" for x in arr[-n_tail:]]
+        items = head + ["..."] + tail
+    return "[" + ", ".join(items) + "]"
+
+
+def _print_vectors(
+    q_hist: np.ndarray,
+    q_grad: np.ndarray,
+    q_compact: np.ndarray,
+    full: bool = False,
+) -> None:
+    """In 3 vector đặc trưng của ảnh truy vấn.
+
+    Mặc định: preview head+tail. `full=True`: in toàn bộ giá trị.
+    Compact6 luôn in đầy đủ vì chỉ 6 chiều.
+    """
+    print(f"[VECTOR]  Color hist ({q_hist.size}-d): "
+          f"sum={q_hist.sum():.4f}, non-zero={(q_hist > 0).sum()}/{q_hist.size}")
+    if full:
+        with np.printoptions(threshold=np.inf, precision=6, linewidth=120, suppress=True):
+            print("          " + np.array2string(q_hist, separator=", ", prefix="          "))
+    else:
+        print(f"          {_format_vector_preview(q_hist)}")
+
+    print(f"[VECTOR]  Gradient   ({q_grad.size}-d) : "
+          f"sum={q_grad.sum():.4f}, non-zero={(q_grad > 0).sum()}/{q_grad.size}")
+    if full:
+        with np.printoptions(threshold=np.inf, precision=6, linewidth=120, suppress=True):
+            print("          " + np.array2string(q_grad, separator=", ", prefix="          "))
+    else:
+        print(f"          {_format_vector_preview(q_grad)}")
+
+    labels = ["mean_rgb", "stddev", "skewness", "coarseness", "contrast", "directionality"]
+    print(f"[VECTOR]  Compact6   ({q_compact.size}-d)  :")
+    for label, val in zip(labels, q_compact):
+        print(f"          {label:<15} = {val:.4f}")
 
 
 def _format_text_output(
     args: argparse.Namespace,
     db_size: int,
-    q_shapes: tuple,
+    q_hist: np.ndarray,
+    q_grad: np.ndarray,
+    q_compact: np.ndarray,
     breakdown: list[dict],
     t_load_ms: float,
     t_query_ms: float,
 ) -> None:
-    q_hist_shape, q_grad_shape, q_compact_shape = q_shapes
     print("=" * 78)
     print(f"[QUERY]   Image: {args.image.name}")
     print("=" * 78)
     print(
-        f"[FEATURE] ColorHist: {q_hist_shape}, Gradient: {q_grad_shape}, "
-        f"Compact6: {q_compact_shape}"
+        f"[FEATURE] ColorHist: {q_hist.shape}, Gradient: {q_grad.shape}, "
+        f"Compact6: {q_compact.shape}"
     )
     print(
         f"[WEIGHT]  w_hist={args.w_hist:.2f}, w_grad={args.w_grad:.2f}, "
         f"w_compact={args.w_compact:.2f}"
     )
-    print(f"[METRIC]  color histogram = {args.distance} (gradient/compact6 = l2)")
+    print("[METRIC]  Euclidean (L2) trên cả 3 nhánh, mean-normalize per-branch")
     if args.coarse_top and args.coarse_top < db_size:
         print(
             f"[STAGE]   two-stage: compact6 → top {args.coarse_top} candidates "
@@ -44,6 +96,8 @@ def _format_text_output(
         )
     else:
         print(f"[STAGE]   single-stage: full scan trên N={db_size} ảnh")
+    print("-" * 78)
+    _print_vectors(q_hist, q_grad, q_compact, full=args.full_vectors)
     print("-" * 78)
 
     if args.breakdown:
@@ -83,7 +137,7 @@ def _result_tag(item: dict, query_name: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Hybrid-3 query CLI (color histogram + gradient + compact6 scalar)",
+        description="Hybrid-3 query CLI (color hist + gradient + compact6, L2 distance)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("image", type=Path, help="Đường dẫn ảnh truy vấn")
@@ -92,12 +146,6 @@ def main() -> None:
     parser.add_argument("--w-hist", type=float, default=0.45, help="Trọng số color histogram")
     parser.add_argument("--w-grad", type=float, default=0.30, help="Trọng số gradient")
     parser.add_argument("--w-compact", type=float, default=0.25, help="Trọng số compact6")
-    parser.add_argument(
-        "--distance",
-        choices=list(HIST_METRICS.keys()),
-        default="l2",
-        help="Metric cho color histogram (gradient và compact6 luôn dùng L2)",
-    )
     parser.add_argument(
         "--coarse-top",
         type=int,
@@ -108,6 +156,11 @@ def main() -> None:
         "--breakdown",
         action="store_true",
         help="In thêm contribution per-branch (color/grad/compact) cho mỗi kết quả",
+    )
+    parser.add_argument(
+        "--full-vectors",
+        action="store_true",
+        help="In toàn bộ giá trị vector đặc trưng (mặc định: chỉ preview head+tail)",
     )
     parser.add_argument(
         "--json",
@@ -142,7 +195,6 @@ def main() -> None:
         w_hist=args.w_hist,
         w_grad=args.w_grad,
         w_compact=args.w_compact,
-        hist_metric=args.distance,
         coarse_top=args.coarse_top,
         return_breakdown=True,
     )
@@ -158,7 +210,6 @@ def main() -> None:
                     "grad": args.w_grad,
                     "compact": args.w_compact,
                 },
-                "hist_metric": args.distance,
                 "coarse_top": args.coarse_top,
             },
             "db_size": len(db),
@@ -166,6 +217,11 @@ def main() -> None:
                 "hist": list(q_hist.shape),
                 "grad": list(q_grad.shape),
                 "compact": list(q_compact.shape),
+            },
+            "feature_vectors": {
+                "hist": q_hist.tolist(),
+                "grad": q_grad.tolist(),
+                "compact": q_compact.tolist(),
             },
             "timing_ms": {"load_db": t_load_ms, "query": t_query_ms},
             "results": breakdown,
@@ -176,7 +232,9 @@ def main() -> None:
     _format_text_output(
         args=args,
         db_size=len(db),
-        q_shapes=(q_hist.shape, q_grad.shape, q_compact.shape),
+        q_hist=q_hist,
+        q_grad=q_grad,
+        q_compact=q_compact,
         breakdown=breakdown,
         t_load_ms=t_load_ms,
         t_query_ms=t_query_ms,

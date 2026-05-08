@@ -209,17 +209,12 @@ def query(
     w_hist: float = 0.45,
     w_grad: float = 0.30,
     w_compact: float = 0.25,
-    hist_metric: str = "l2",
     coarse_top: int | None = None,
     return_breakdown: bool = False,
 ):
-    """Query hybrid3.
-
-    Default behavior giữ nguyên (single-stage, L2, không breakdown) để
-    benchmark_pipelines.py và caller cũ không bị đổi signature.
+    """Query hybrid3 với khoảng cách Euclidean (L2) trên cả 3 nhánh.
 
     Tham số nâng cao:
-        hist_metric: 'l2' | 'l1' | 'chi2' | 'intersection' cho color histogram.
         coarse_top: nếu > 0, dùng two-stage retrieval (compact6 lọc thô).
         return_breakdown: nếu True, trả thêm list dict per-branch contribution.
     """
@@ -237,7 +232,6 @@ def query(
         w_hist=w_hist,
         w_grad=w_grad,
         w_compact=w_compact,
-        hist_metric=hist_metric,
         return_breakdown=return_breakdown,
     )
 

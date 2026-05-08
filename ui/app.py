@@ -1,15 +1,7 @@
-"""Phase 6: Streamlit UI cho hệ thống CBIR ảnh nền thiên nhiên.
+"""Streamlit UI cho CBIR hybrid3 (color hist + gradient + compact6 scalar).
 
 Cách chạy:
     streamlit run ui/app.py
-
-Layout:
-    - Sidebar: tuỳ chọn in toàn bộ vector ra console + thống kê CSDL
-    - Cột trái: upload ảnh + preview
-    - Cột phải: button "Tìm kiếm" -> grid 5 cột top-5 (ảnh, tên, distance)
-    - Expander: thống kê vector (sum Color/Shape, non-zero bins)
-
-Mỗi lần query in ra terminal nơi chạy streamlit theo format bắt buộc.
 """
 from __future__ import annotations
 
@@ -26,88 +18,119 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
-from src.config import (
-    COLOR_DIM,
-    DATASET_DIR,
-    FREQ_DIM,
-    GRAD_DIM,
-    TOP_K,
-    TOTAL_DIM,
-    W_COLOR,
-    W_FREQ,
-    W_LAYOUT,
-    W_SHAPE,
-)
-from src.database import load_database
-from src.feature_extractor import extract_feature_components
-from src.layout_features import extract_layout_scalars
-from src.logger import log_query
-from src.matcher import find_top_k_weighted
+from src.color_features import extract_color_feature
+from src.compact6_features import extract_compact6
+from src.config import DATA_DIR, DATASET_DIR, TOP_K
+from src.database_hybrid3 import count_images, load_database
+from src.gradient_features import extract_gradient_feature
+from src.matcher_hybrid3 import find_top_k_hybrid3, find_top_k_hybrid3_two_stage
 from src.preprocessing import resize_image, to_grayscale
 
+DB_PATH = DATA_DIR / "features_hybrid3.db"
+
 st.set_page_config(
-    page_title="CBIR - Tìm kiếm ảnh nền thiên nhiên",
+    page_title="CBIR Hybrid3 - Tìm kiếm ảnh nền thiên nhiên",
     page_icon="🌿",
     layout="wide",
 )
 
 
-@st.cache_resource(show_spinner="Đang nạp CSDL đặc trưng...")
+@st.cache_resource(show_spinner="Đang nạp CSDL hybrid3...")
 def get_db():
-    """Cache CSDL trong RAM cho toàn bộ session - tránh đọc lại mỗi lần rerun."""
-    return load_database()
+    return load_database(DB_PATH)
 
 
-def extract_from_uploaded_bytes(
-    img_bytes: bytes,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Đọc bytes -> RGB gốc + (color, shape, freq) đặc trưng."""
+def _read_uploaded_bytes(uploaded) -> bytes:
+    """Đọc bytes từ Streamlit UploadedFile, an toàn với mọi phiên bản streamlit.
+
+    `getvalue()` đôi khi fail nếu cursor đã bị di chuyển. Fallback sang seek+read.
+    """
+    if uploaded is None:
+        return b""
+    try:
+        data = uploaded.getvalue()
+    except (AttributeError, ValueError):
+        try:
+            uploaded.seek(0)
+        except Exception:
+            pass
+        data = uploaded.read()
+    if data is None:
+        return b""
+    if not isinstance(data, (bytes, bytearray)):
+        data = bytes(data)
+    return bytes(data)
+
+
+def _load_image_bytes(path: Path) -> bytes | None:
+    """Đọc file ảnh từ disk thành bytes (để pass trực tiếp cho st.image).
+
+    Đáng tin cậy hơn st.image(str(path)) vì không phụ thuộc cách Streamlit
+    serve file path đến client.
+    """
+    try:
+        return path.read_bytes()
+    except (OSError, FileNotFoundError):
+        return None
+
+
+def extract_from_uploaded(img_bytes: bytes):
+    """Đọc bytes -> RGB gốc + (color hist 576-d, gradient 81-d, compact6 6-d)."""
     img = Image.open(BytesIO(img_bytes)).convert("RGB")
     rgb_orig = np.asarray(img, dtype=np.uint8)
     rgb = resize_image(rgb_orig)
     gray = to_grayscale(rgb)
-    c, s, f = extract_feature_components(rgb, gray)
-    l = np.asarray(extract_layout_scalars(gray), dtype=np.float32)
-    return rgb_orig, c, s, f, l
+    hist = extract_color_feature(rgb).astype(np.float32)
+    grad = extract_gradient_feature(gray).astype(np.float32)
+    compact, _ = extract_compact6(rgb, gray)
+    return rgb_orig, hist, grad, compact.astype(np.float32)
 
 
-def render_results(results: list[tuple[str, float]]) -> None:
-    """Grid 5 cột: thumbnail + filename + distance."""
+def render_results(results: list[tuple[str, float]], query_name: str | None = None) -> None:
     cols = st.columns(len(results))
     for col, (name, dist) in zip(cols, results):
         with col:
             path = DATASET_DIR / name
-            if path.exists():
-                st.image(str(path), use_container_width=True)
+            img_bytes = _load_image_bytes(path)
+            if img_bytes is not None:
+                st.image(img_bytes, use_container_width=True)
             else:
                 st.warning(f"Không tìm thấy {name}")
             st.markdown(f"**{name}**")
-            st.code(f"d = {dist:.4f}")
+            tag = ""
+            if query_name and name == query_name and dist < 1e-5:
+                tag = "  ← self"
+            elif dist < 1e-5:
+                tag = "  ← duplicate"
+            st.code(f"d = {dist:.4f}{tag}")
 
 
 def main() -> None:
-    st.title("🌿 CBIR — Tìm kiếm ảnh nền thiên nhiên")
-    st.caption(
-        f"Vector đặc trưng **{TOTAL_DIM}** chiều = "
-        f"Color **{COLOR_DIM}** (lưới 3×3 × RGB 4×4×4) + "
-        f"Shape **{GRAD_DIM}** (lưới 3×3 × 9 bin gradient)"
-    )
+    st.title("🌿 CBIR Hybrid3 — Tìm kiếm ảnh nền thiên nhiên")
+    st.caption("Vector đặc trưng = Color hist (576-d) + Gradient (81-d) + Compact6 (6-d) · L2 distance")
+
+    if count_images(DB_PATH) == 0:
+        st.error(f"CSDL rỗng tại {DB_PATH}. Hãy chạy `python build_database_hybrid3.py` trước.")
+        st.stop()
 
     db = get_db()
-    if len(db) == 0:
-        st.error("CSDL rỗng. Hãy chạy `python build_database.py` trước.")
-        st.stop()
 
     with st.sidebar:
         st.header("Cấu hình")
         st.success(f"CSDL: {len(db)} ảnh")
-        st.text(f"W_COLOR = {W_COLOR}\nW_SHAPE = {W_SHAPE}\nTOP_K   = {TOP_K}")
-        full_vector = st.checkbox(
-            "In toàn bộ vector ra console",
-            value=False,
-            help="Mặc định in 4 đầu + 4 cuối. Bật để in đầy đủ 657 phần tử.",
+        k = st.number_input("Số kết quả top-k", min_value=1, max_value=20, value=TOP_K)
+        st.markdown("**Trọng số fusion** (mean-normalize per branch)")
+        w_hist = st.slider("w_hist (color)", 0.0, 1.0, 0.45, step=0.05)
+        w_grad = st.slider("w_grad (gradient)", 0.0, 1.0, 0.30, step=0.05)
+        w_compact = st.slider("w_compact (compact6)", 0.0, 1.0, 0.25, step=0.05)
+        st.markdown("**Two-stage retrieval**")
+        coarse_top = st.number_input(
+            "coarse_top (0 = single-stage)",
+            min_value=0,
+            max_value=len(db),
+            value=0,
+            help="compact6 lọc thô top-N candidates trước khi rank đầy đủ",
         )
-        k = st.number_input("Số kết quả (top-k)", min_value=1, max_value=20, value=TOP_K)
 
     uploaded = st.file_uploader(
         "Chọn ảnh truy vấn (.jpg / .jpeg / .png)",
@@ -118,7 +141,10 @@ def main() -> None:
         st.info("👆 Upload một ảnh để bắt đầu tìm kiếm.")
         st.stop()
 
-    img_bytes = uploaded.getvalue()
+    img_bytes = _read_uploaded_bytes(uploaded)
+    if not img_bytes:
+        st.error("Không đọc được nội dung ảnh upload. Thử lại với file khác.")
+        st.stop()
     file_size_kb = len(img_bytes) / 1024
 
     col_left, col_right = st.columns([1, 2])
@@ -126,8 +152,8 @@ def main() -> None:
     with col_left:
         st.subheader("Ảnh truy vấn")
         st.image(img_bytes, use_container_width=True)
-        st.text(f"Tên file: {uploaded.name}")
-        st.text(f"Kích thước: {file_size_kb:.1f} KB")
+        st.text(f"Tên: {uploaded.name}")
+        st.text(f"Size: {file_size_kb:.1f} KB")
         search = st.button("🔍 Tìm kiếm Top-K", type="primary", use_container_width=True)
 
     with col_right:
@@ -137,69 +163,59 @@ def main() -> None:
 
         try:
             t0 = time.perf_counter()
-            _, q_color, q_shape, q_freq, q_layout = extract_from_uploaded_bytes(img_bytes)
-            q_vec = np.concatenate([W_COLOR * q_color, W_SHAPE * q_shape, W_FREQ * q_freq]).astype(
-                np.float32
-            )
+            _, q_hist, q_grad, q_compact = extract_from_uploaded(img_bytes)
             t_extract = (time.perf_counter() - t0) * 1000
 
             t0 = time.perf_counter()
-            top = find_top_k_weighted(
-                q_color=q_color,
-                q_shape=q_shape,
-                q_freq=q_freq,
-                db_color=db.color_vectors,
-                db_shape=db.shape_vectors,
-                db_freq=db.freq_vectors,
-                q_layout=q_layout,
-                db_layout=db.layout_scalars,
-                k=int(k),
+            common = dict(
+                q_hist=q_hist,
+                q_grad=q_grad,
+                q_compact=q_compact,
+                db_hist=db.hist_vectors,
+                db_grad=db.grad_vectors,
+                db_compact=db.compact_vectors,
                 ids=db.filenames,
-                w_color=W_COLOR,
-                w_shape=W_SHAPE,
-                w_freq=W_FREQ,
-                w_layout=W_LAYOUT,
+                k=int(k),
+                w_hist=w_hist,
+                w_grad=w_grad,
+                w_compact=w_compact,
             )
+            if coarse_top > 0 and coarse_top < len(db):
+                top = find_top_k_hybrid3_two_stage(coarse_top=int(coarse_top), **common)
+                stage_label = f"two-stage (coarse_top={coarse_top})"
+            else:
+                top = find_top_k_hybrid3(**common)
+                stage_label = "single-stage (full scan)"
             results = [(str(name), float(dist)) for name, dist in top]
             t_match = (time.perf_counter() - t0) * 1000
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             st.exception(exc)
             return
 
-        log_query(uploaded.name, q_vec, results, full_vector=full_vector)
-
         st.subheader(f"Top-{len(results)} kết quả")
-        render_results(results)
+        render_results(results, query_name=uploaded.name)
 
-        with st.expander(f"Thông tin vector đặc trưng ({TOTAL_DIM} chiều)"):
-            color = q_vec[:COLOR_DIM]
-            shape = q_vec[COLOR_DIM:COLOR_DIM + GRAD_DIM]
-            freq = q_vec[COLOR_DIM + GRAD_DIM:]
-            c1, c2, c3, c4 = st.columns(4)
+        with st.expander("Thông tin vector & timing"):
+            c1, c2, c3 = st.columns(3)
             c1.metric(
-                "Color (576 dim)",
-                f"sum = {color.sum():.4f}",
-                f"non-zero {(color > 0).sum()}/{COLOR_DIM}",
+                "Color hist (576-d)",
+                f"sum = {q_hist.sum():.4f}",
+                f"non-zero {(q_hist > 0).sum()}/576",
             )
             c2.metric(
-                "Shape (81 dim)",
-                f"sum = {shape.sum():.4f}",
-                f"non-zero {(shape > 0).sum()}/{GRAD_DIM}",
+                "Gradient (81-d)",
+                f"sum = {q_grad.sum():.4f}",
+                f"non-zero {(q_grad > 0).sum()}/81",
             )
             c3.metric(
-                "Frequency",
-                f"sum = {freq.sum():.4f}",
-                f"non-zero {(freq > 0).sum()}/{FREQ_DIM}",
-            )
-            c4.metric(
-                "Tổng",
-                f"sum = {q_vec.sum():.4f}",
-                f"shape = {q_vec.shape}",
+                "Compact6 (6-d)",
+                f"min/max = {q_compact.min():.3f}/{q_compact.max():.3f}",
+                f"mean = {q_compact.mean():.3f}",
             )
             st.caption(
-                f"Extract: {t_extract:.1f} ms · Match (top-k trong {len(db)} ảnh): {t_match:.1f} ms"
+                f"Stage: {stage_label} · Extract {t_extract:.1f} ms · "
+                f"Match {t_match:.1f} ms ({len(db)} ảnh)"
             )
-            st.info("Vector đầy đủ đã được in ra terminal nơi đang chạy `streamlit run`.")
 
 
 if __name__ == "__main__":

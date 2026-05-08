@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.distances import euclidean_distance_batch, get_hist_metric
+from src.distances import euclidean_distance_batch
 
 
 def hybrid3_distance_components(
@@ -12,16 +12,12 @@ def hybrid3_distance_components(
     db_hist: np.ndarray,
     db_grad: np.ndarray,
     db_compact: np.ndarray,
-    hist_metric: str = "l2",
 ) -> dict[str, np.ndarray | float]:
-    """Tính raw distance per-branch và scale-factor để mean-normalize.
+    """Tính raw L2 distance per-branch và scale-factor để mean-normalize.
 
-    Cho phép caller (find_top_k_*) tự cộng có trọng số, đồng thời reuse các
-    nhánh để in breakdown phân tích. Tách ra để hai-stage retrieval không
-    tính lại compact6.
+    Tách ra để two-stage retrieval không tính lại compact6.
     """
-    hist_fn = get_hist_metric(hist_metric)
-    d_hist = hist_fn(q_hist, db_hist)
+    d_hist = euclidean_distance_batch(q_hist, db_hist)
     d_grad = euclidean_distance_batch(q_grad, db_grad)
     d_comp = euclidean_distance_batch(q_compact, db_compact)
 
@@ -60,9 +56,8 @@ def hybrid3_distance_batch(
     w_hist: float = 0.45,
     w_grad: float = 0.30,
     w_compact: float = 0.25,
-    hist_metric: str = "l2",
 ) -> np.ndarray:
-    """Backward-compatible: trả tổng distance dạng mảng (N,)."""
+    """Trả tổng distance dạng mảng (N,)."""
     components = hybrid3_distance_components(
         q_hist=q_hist,
         q_grad=q_grad,
@@ -70,7 +65,6 @@ def hybrid3_distance_batch(
         db_hist=db_hist,
         db_grad=db_grad,
         db_compact=db_compact,
-        hist_metric=hist_metric,
     )
     return combine_distances(components, w_hist, w_grad, w_compact)
 
@@ -117,10 +111,9 @@ def find_top_k_hybrid3(
     w_hist: float = 0.45,
     w_grad: float = 0.30,
     w_compact: float = 0.25,
-    hist_metric: str = "l2",
     return_breakdown: bool = False,
 ):
-    """Single-stage: full scan rồi rank theo combined distance."""
+    """Single-stage: full scan rồi rank theo combined L2 distance."""
     n = db_hist.shape[0]
     if n == 0:
         return ([], []) if return_breakdown else []
@@ -137,7 +130,6 @@ def find_top_k_hybrid3(
         db_hist=db_hist,
         db_grad=db_grad,
         db_compact=db_compact,
-        hist_metric=hist_metric,
     )
     d = combine_distances(components, w_hist, w_grad, w_compact)
     order = np.argsort(d)[:k]
@@ -162,15 +154,14 @@ def find_top_k_hybrid3_two_stage(
     w_hist: float = 0.45,
     w_grad: float = 0.30,
     w_compact: float = 0.25,
-    hist_metric: str = "l2",
     return_breakdown: bool = False,
 ):
     """Two-stage retrieval theo lý thuyết CSDL Đa phương tiện.
 
-    Stage 1: lọc thô bằng compact6 (chỉ 6-dim, rất nhanh) -> giữ M = coarse_top candidates.
+    Stage 1: lọc thô bằng compact6 (chỉ 6-d, rất nhanh) -> giữ M = coarse_top candidates.
     Stage 2: tính color hist + gradient + compact6 đầy đủ trên M ảnh -> top-k cuối.
 
-    Khi coarse_top >= N hoặc <= 0: rơi về single-stage (find_top_k_hybrid3).
+    Khi coarse_top >= N hoặc <= 0: rơi về single-stage.
     """
     n = db_hist.shape[0]
     if n == 0:
@@ -188,7 +179,6 @@ def find_top_k_hybrid3_two_stage(
             w_hist=w_hist,
             w_grad=w_grad,
             w_compact=w_compact,
-            hist_metric=hist_metric,
             return_breakdown=return_breakdown,
         )
 
@@ -208,6 +198,5 @@ def find_top_k_hybrid3_two_stage(
         w_hist=w_hist,
         w_grad=w_grad,
         w_compact=w_compact,
-        hist_metric=hist_metric,
         return_breakdown=return_breakdown,
     )
