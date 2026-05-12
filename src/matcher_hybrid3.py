@@ -161,6 +161,9 @@ def find_top_k_hybrid3_two_stage(
     Stage 1: lọc thô bằng compact6 (chỉ 6-d, rất nhanh) -> giữ M = coarse_top candidates.
     Stage 2: tính color hist + gradient + compact6 đầy đủ trên M ảnh -> top-k cuối.
 
+    Lưu ý: sau stage 1 chỉ còn đúng M ảnh, nên số kết quả trả về là min(k, M).
+    Muốn có đủ k ảnh thì cần coarse_top >= k (và k <= N).
+
     Khi coarse_top >= N hoặc <= 0: rơi về single-stage.
     """
     n = db_hist.shape[0]

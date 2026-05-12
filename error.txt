@@ -1,0 +1,26 @@
+2026-05-12 11:57:52.402 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-05-12 11:57:52.402 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-05-12 11:57:52.402 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+Traceback (most recent call last):
+  File "D:\BTL-CSDL-DPT\ui\app.py", line 307, in <module>
+    main()
+  File "D:\BTL-CSDL-DPT\ui\app.py", line 232, in main
+    st.image(np.asarray(query_image), use_container_width=True)
+  File "D:\BTL-CSDL-DPT\.venv\Lib\site-packages\streamlit\runtime\metrics_util.py", line 563, in wrapped_func
+    result = non_optional_func(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\BTL-CSDL-DPT\.venv\Lib\site-packages\streamlit\elements\image.py", line 217, in image     
+    marshall_images(
+  File "D:\BTL-CSDL-DPT\.venv\Lib\site-packages\streamlit\elements\lib\image_utils.py", line 443, in marshall_images
+    proto_img.url = image_to_url(
+                    ^^^^^^^^^^^^^
+  File "D:\BTL-CSDL-DPT\.venv\Lib\site-packages\streamlit\elements\lib\image_utils.py", line 319, in image_to_url
+    image = _clip_image(_verify_np_shape(image), clamp)  # ty: ignore[invalid-argument-type, unused-ignore-comment]
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\BTL-CSDL-DPT\.venv\Lib\site-packages\streamlit\elements\lib\image_utils.py", line 159, in _verify_np_shape
+    raise StreamlitAPIException("Numpy shape has to be of length 2 or 3.")
+streamlit.errors.StreamlitAPIException: Numpy shape has to be of length 2 or 3.
